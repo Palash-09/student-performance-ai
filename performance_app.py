@@ -6,7 +6,7 @@ import os
 import matplotlib.pyplot as plt
 
 # -------------------------------
-# Load model (try joblib, fallback to pickle)
+# Load model (joblib/pickle)
 # -------------------------------
 def load_model(path="student_model_1.pkl"):
     try:
@@ -17,7 +17,7 @@ def load_model(path="student_model_1.pkl"):
         with open(path, "rb") as f:
             return pickle.load(f)
 
-@st.cache(allow_output_mutation=True)
+@st.cache_resource
 def get_model(path="student_model_1.pkl"):
     if not os.path.exists(path):
         st.error(f"❌ Model file not found: {path}")
@@ -28,29 +28,45 @@ def get_model(path="student_model_1.pkl"):
         st.error(f"❌ Failed to load model: {e}")
         return None
 
-# Expected feature columns (update if your model was trained with different ones)
+# Expected feature columns (update if model trained differently)
 FEATURE_COLS = ["Part A", "Part B", "Part C", "Part D", "Part E"]
 
 # -------------------------------
-# Streamlit UI
+# Page Config
 # -------------------------------
-st.set_page_config(page_title="Student Performance Review", layout="wide")
+st.set_page_config(
+    page_title="Student Performance Review",
+    page_icon="📊",
+    layout="wide"
+)
+
+# -------------------------------
+# Sidebar
+# -------------------------------
+st.sidebar.title("📂 Upload Data")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Excel/CSV file", type=["xlsx", "xls", "csv"]
+)
+st.sidebar.markdown("---")
+st.sidebar.info("Expected columns:\n- Roll Number\n- Student Name\n- Part A – Part E (scores 0–5)")
+
+# -------------------------------
+# Main Header
+# -------------------------------
 st.title("📊 AI-based Student Performance Review")
-st.markdown("""
-Upload an Excel/CSV file with columns:  
-**Student ID, Part A, Part B, Part C, Part D, Part E** (scores 0–5).  
+st.markdown(
+    "This system predicts **individual weak topics** and identifies the "
+    "**overall weakest topic in the class** using a trained ML model "
+    "(`student_model_1.pkl`)."
+)
 
-The app uses **student_model_1.pkl** to predict each student's weakest topic,  
-and also shows the **overall weakest topic in the class**.
-""")
-
-# Load trained model
+# -------------------------------
+# Load Model
+# -------------------------------
 model = get_model("student_model_1.pkl")
 
-uploaded_file = st.file_uploader("📂 Upload Excel/CSV file", type=["xlsx", "xls", "csv"])
-
 if uploaded_file is None:
-    st.info("⬆️ Please upload a file to start analysis.")
+    st.warning("⬆️ Please upload a student performance file to continue.")
     st.stop()
 
 # -------------------------------
@@ -69,17 +85,11 @@ st.subheader("📑 Uploaded Data Preview")
 st.dataframe(df.head(), use_container_width=True)
 
 # -------------------------------
-# Ensure Student ID column
+# Ensure Roll Number & Student Name exist
 # -------------------------------
-possible_id_cols = ["Student ID", "ID", "Roll No", "RollNumber"]
-id_col = None
-for c in possible_id_cols:
-    if c in df.columns:
-        id_col = c
-        break
-if id_col is None:
-    df.insert(0, "Student ID", range(1, len(df) + 1))
-    id_col = "Student ID"
+if "Roll Number" not in df.columns or "Student Name" not in df.columns:
+    st.error("❌ Uploaded file must have 'Roll Number' and 'Student Name' columns.")
+    st.stop()
 
 # -------------------------------
 # Map feature columns
@@ -124,35 +134,45 @@ df["Predicted Weak Topic"] = preds
 # -------------------------------
 # Show Results
 # -------------------------------
-st.subheader("👩‍🎓 Student-wise Predictions")
-st.dataframe(df[[id_col, *FEATURE_COLS, "Predicted Weak Topic"]], use_container_width=True)
+st.header("👩‍🎓 Student Analysis")
+st.dataframe(
+    df[["Roll Number", "Student Name", *FEATURE_COLS, "Predicted Weak Topic"]],
+    use_container_width=True
+)
 
-# Overall weakest topic
 topic_counts = df["Predicted Weak Topic"].value_counts()
 if not topic_counts.empty:
     overall_weak = topic_counts.idxmax()
-    st.subheader("🏆 Overall Weakest Topic in Class")
-    st.success(f"{overall_weak} — {topic_counts.loc[overall_weak]} students")
+    st.header("🏆 Class Insights")
+    st.success(f"**Overall Weakest Topic:** {overall_weak} "
+               f"({topic_counts.loc[overall_weak]} students)")
 
-    # Bar Chart
-    st.subheader("📊 Weak Topic Distribution")
-    fig1, ax1 = plt.subplots()
-    ax1.bar(topic_counts.index.astype(str), topic_counts.values)
-    ax1.set_xlabel("Topic")
-    ax1.set_ylabel("Number of Students")
-    ax1.set_title("Predicted Weak Topics Across Class")
-    st.pyplot(fig1)
+    col1, col2 = st.columns(2)
 
-    # Pie Chart
-    st.subheader("🧩 Weak Topic Proportions")
-    fig2, ax2 = plt.subplots()
-    ax2.pie(topic_counts.values, labels=topic_counts.index.astype(str), autopct="%1.1f%%")
-    ax2.set_title("Weak Topics Share")
-    st.pyplot(fig2)
+    with col1:
+        st.subheader("📊 Distribution of Weak Topics")
+        fig1, ax1 = plt.subplots()
+        ax1.bar(topic_counts.index.astype(str), topic_counts.values, color="#1f77b4")
+        ax1.set_xlabel("Topic")
+        ax1.set_ylabel("Number of Students")
+        ax1.set_title("Weak Topics Across Class")
+        st.pyplot(fig1)
+
+    with col2:
+        st.subheader("🧩 Proportion of Weak Topics")
+        fig2, ax2 = plt.subplots()
+        ax2.pie(topic_counts.values, labels=topic_counts.index.astype(str), autopct="%1.1f%%")
+        ax2.set_title("Weak Topics Share")
+        st.pyplot(fig2)
 
 # -------------------------------
-# Download Predictions
+# Download Results
 # -------------------------------
+st.header("💾 Download Results")
 csv_bytes = df.to_csv(index=False).encode("utf-8")
-st.download_button("💾 Download Predictions (CSV)", data=csv_bytes,
-                   file_name="predicted_weak_topics.csv", mime="text/csv")
+st.download_button(
+    "Download Predictions as CSV",
+    data=csv_bytes,
+    file_name="predicted_weak_topics.csv",
+    mime="text/csv"
+)
